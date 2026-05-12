@@ -1,0 +1,431 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Finary API",
+    "version": "1.0.0",
+    "description": "Interactive documentation for the Finary API."
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Same-origin"
+    },
+    {
+      "url": "https://api-finary.my.id/api",
+      "description": "Production (HTTPS)"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["name", "email", "password", "password_confirmation"],
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "password_confirmation": { "type": "string" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" }
+        }
+      },
+      "AssessmentRequest": {
+        "type": "object",
+        "properties": {
+          "age": { "type": "integer" },
+          "income": { "type": "number" },
+          "expenses": { "type": "number" },
+          "savings": { "type": "number" },
+          "loan_payment": { "type": "number" }
+        }
+      },
+      "TransactionRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "amount": { "type": "number" },
+          "type": { "type": "string", "enum": ["income", "expense"] },
+          "category": { "type": "string" },
+          "date": { "type": "string", "format": "date" }
+        }
+      },
+      "BudgetRequest": {
+        "type": "object",
+        "properties": {
+          "category": { "type": "string" },
+          "limit": { "type": "number" }
+        }
+      },
+      "ForumPostRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      },
+      "ForumReplyRequest": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" }
+        }
+      },
+      "SideHustleRequest": {
+        "type": "object",
+        "properties": {
+          "age": { "type": "integer" },
+          "interests": { "type": "array", "items": { "type": "string" } },
+          "skills": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "summary": "Register user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Registered" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Login user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Logged in" }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "summary": "Get current user",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "User profile" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "Logout user",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Logged out" }
+        }
+      }
+    },
+    "/dashboard": {
+      "get": {
+        "summary": "Get dashboard",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Dashboard data" }
+        }
+      }
+    },
+    "/assessment/latest": {
+      "get": {
+        "summary": "Get latest assessment",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Latest assessment" }
+        }
+      }
+    },
+    "/assessment": {
+      "post": {
+        "summary": "Create assessment",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AssessmentRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Assessment created" }
+        }
+      }
+    },
+    "/transactions": {
+      "get": {
+        "summary": "List transactions",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Transaction list" }
+        }
+      },
+      "post": {
+        "summary": "Create transaction",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransactionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Transaction created" }
+        }
+      }
+    },
+    "/transactions/{transaction}": {
+      "put": {
+        "summary": "Update transaction",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "transaction",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransactionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Transaction updated" }
+        }
+      },
+      "delete": {
+        "summary": "Delete transaction",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "transaction",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Transaction deleted" }
+        }
+      }
+    },
+    "/budgets": {
+      "get": {
+        "summary": "List budgets",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Budget list" }
+        }
+      },
+      "post": {
+        "summary": "Create budget",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BudgetRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Budget created" }
+        }
+      }
+    },
+    "/budgets/{budget}": {
+      "put": {
+        "summary": "Update budget",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "budget",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BudgetRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Budget updated" }
+        }
+      },
+      "delete": {
+        "summary": "Delete budget",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "budget",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Budget deleted" }
+        }
+      }
+    },
+    "/insights/profile": {
+      "get": {
+        "summary": "Get profile insight",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Profile insight" }
+        }
+      }
+    },
+    "/insights/badges": {
+      "get": {
+        "summary": "Get badges",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Badges list" }
+        }
+      }
+    },
+    "/insights/leaderboard": {
+      "get": {
+        "summary": "Get leaderboard",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Leaderboard" }
+        }
+      }
+    },
+    "/recommendations/side-hustles": {
+      "post": {
+        "summary": "Get side hustle recommendations",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SideHustleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Recommendations" }
+        }
+      }
+    },
+    "/forum/posts": {
+      "get": {
+        "summary": "List forum posts",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Forum posts" }
+        }
+      },
+      "post": {
+        "summary": "Create forum post",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForumPostRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Forum post created" }
+        }
+      }
+    },
+    "/forum/posts/{post}/replies": {
+      "post": {
+        "summary": "Reply to forum post",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "post",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForumReplyRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Reply created" }
+        }
+      }
+    },
+    "/reports/transactions/export": {
+      "get": {
+        "summary": "Export transactions CSV",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Month string, e.g. 2026-05"
+          }
+        ],
+        "responses": {
+          "200": { "description": "CSV file" }
+        }
+      }
+    }
+  }
+}
