@@ -178,12 +178,13 @@
                 <p class="subtitle">
                     Everything you need to integrate Finary. Clean endpoints, clear auth, and a single download button.
                 </p>
-                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                        <a class="cta" href="/docs/download">Download API Docs (Markdown)</a>
-                        <a class="cta" style="background: var(--blue); box-shadow: 0 12px 24px rgba(28, 176, 246, 0.25);" href="/">
-                            Try API (Interactive)
-                        </a>
-                    </div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <a class="cta" href="/docs/download">Download API Docs (Markdown)</a>
+                    <a class="cta" style="background: var(--blue); box-shadow: 0 12px 24px rgba(28, 176, 246, 0.25);"
+                        href="/">
+                        Try API (Interactive)
+                    </a>
+                </div>
             </div>
             <div class="hero-card">
                 <h3>Base URL</h3>
