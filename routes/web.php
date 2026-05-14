@@ -39,3 +39,16 @@ Route::get('/docs/download', function () {
 Route::get('/docs/test', function () {
     return redirect('/');
 });
+
+// Temporary: clear all caches (remove after confirming fix)
+Route::get('/clear-cache', function () {
+    \Illuminate\Support\Facades\Artisan::call('cache:clear');
+    \Illuminate\Support\Facades\Artisan::call('config:clear');
+    \Illuminate\Support\Facades\Artisan::call('route:clear');
+    \Illuminate\Support\Facades\Artisan::call('view:clear');
+
+    return response()->json([
+        'message' => 'All caches cleared.',
+        'timestamp' => now()->toDateTimeString(),
+    ]);
+});
