@@ -55,28 +55,37 @@ class FinancialClassifierService
 
         $netCashFlow = $income - $expense;
         $expenseRatio = $income > 0 ? $expense / $income : 1;
-        $savingRate = $income > 0 ? $actualSavings / $income : 0;
-        $spendingEfficiency = $budgetGoal > 0 ? min(1, $actualSavings / $budgetGoal) : 0;
+
+        // Saving rate: use the better of actual savings or net cashflow relative to income
+        // This prevents misclassification when user reports low "actual_savings" but has good cashflow
+        $savingRateFromCashflow = $income > 0 ? $netCashFlow / $income : 0;
+        $savingRateFromActual = $income > 0 ? $actualSavings / $income : 0;
+        $savingRate = max($savingRateFromCashflow, $savingRateFromActual);
+
+        $spendingEfficiency = $budgetGoal > 0 ? min(1, max($actualSavings, $netCashFlow) / $budgetGoal) : 0;
 
         $riskFlags = [
             'negative_cash_flow' => $netCashFlow < 0,
             'high_expense_ratio' => $expenseRatio >= 0.85,
             'low_savings_rate' => $savingRate < 0.1,
-            'savings_goal_not_met' => $budgetGoal > 0 && $actualSavings < $budgetGoal,
+            'savings_goal_not_met' => $budgetGoal > 0 && max($actualSavings, $netCashFlow) < $budgetGoal,
             'low_spending_efficiency' => $spendingEfficiency < 0.5,
         ];
 
         if ($netCashFlow <= 0 || $expenseRatio >= 0.9 || $savingRate < 0.05) {
             $classification = 'survival';
-            $score = 0.72;
+            // Score reflects how severe: closer to 1.0 = more confident
+            $severityFactors = ($netCashFlow <= 0 ? 1 : 0) + ($expenseRatio >= 0.9 ? 1 : 0) + ($savingRate < 0.05 ? 1 : 0);
+            $score = round(0.55 + ($severityFactors * 0.12), 4);
             $focus = [
                 'prioritize_essential_expenses',
                 'stabilize_monthly_cash_flow',
                 'find_short_term_income_support',
             ];
-        } elseif ($savingRate >= 0.2 && $actualSavings >= $budgetGoal && $emergencyFund >= max($expense, 1)) {
+        } elseif ($savingRate >= 0.2 && max($actualSavings, $netCashFlow) >= $budgetGoal && $emergencyFund >= $expense) {
             $classification = 'growth';
-            $score = 0.78;
+            $growthFactors = ($savingRate >= 0.3 ? 1 : 0) + ($emergencyFund >= $expense * 3 ? 1 : 0) + ($spendingEfficiency >= 0.8 ? 1 : 0);
+            $score = round(0.65 + ($growthFactors * 0.08), 4);
             $focus = [
                 'maintain_growth_momentum',
                 'increase_investment_allocation',
@@ -84,7 +93,7 @@ class FinancialClassifierService
             ];
         } else {
             $classification = 'stable';
-            $score = 0.68;
+            $score = round(0.55 + (min($savingRate, 0.2) * 1.5), 4);
             $focus = [
                 'keep_expense_ratio_controlled',
                 'build_budgeting_consistency',
@@ -92,11 +101,8 @@ class FinancialClassifierService
             ];
         }
 
-        $probabilities = [
-            'survival' => $classification === 'survival' ? $score : round((1 - $score) / 2, 4),
-            'stable' => $classification === 'stable' ? $score : round((1 - $score) / 2, 4),
-            'growth' => $classification === 'growth' ? $score : round((1 - $score) / 2, 4),
-        ];
+        // Calculate realistic probabilities based on financial indicators
+        $probabilities = $this->calculateProbabilities($classification, $score, $expenseRatio, $savingRate);
 
         return [
             'classification' => $classification,
@@ -118,6 +124,38 @@ class FinancialClassifierService
             'risk_flags' => $riskFlags,
             'recommendation_focus' => $focus,
             'explanation' => 'Fallback rule-based classification was used because the ML service was unavailable.',
+        ];
+    }
+
+    private function calculateProbabilities(string $classification, float $score, float $expenseRatio, float $savingRate): array
+    {
+        // Distribute remaining probability realistically
+        $remaining = 1.0 - $score;
+
+        if ($classification === 'survival') {
+            // If survival, stable is more likely than growth
+            return [
+                'survival' => round($score, 4),
+                'stable' => round($remaining * 0.7, 4),
+                'growth' => round($remaining * 0.3, 4),
+            ];
+        }
+
+        if ($classification === 'growth') {
+            // If growth, stable is more likely than survival
+            return [
+                'survival' => round($remaining * 0.2, 4),
+                'stable' => round($remaining * 0.8, 4),
+                'growth' => round($score, 4),
+            ];
+        }
+
+        // Stable: distribute based on which direction they lean
+        $leanGrowth = $savingRate >= 0.15 && $expenseRatio < 0.7;
+        return [
+            'survival' => round($remaining * ($leanGrowth ? 0.2 : 0.5), 4),
+            'stable' => round($score, 4),
+            'growth' => round($remaining * ($leanGrowth ? 0.8 : 0.5), 4),
         ];
     }
 }

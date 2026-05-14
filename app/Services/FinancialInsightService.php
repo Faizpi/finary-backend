@@ -84,7 +84,7 @@ class FinancialInsightService
             $warnings[] = 'Cashflow bulan ini negatif. Pangkas pengeluaran non-esensial.';
         }
 
-        $nextMonthPrediction = round($monthlyChart->pluck('balance')->avg() ?? 0, 2);
+        $nextMonthPrediction = $this->estimateNextMonthBalance($monthlyChart, $monthly);
 
         $recommendations = [];
         if ($spendingHabit === 'agresif') {
@@ -120,11 +120,29 @@ class FinancialInsightService
         $dateKey = Carbon::now()->toDateString();
         $cacheKey = "finary:predict:{$user->id}:{$dateKey}";
 
-        return Cache::remember($cacheKey, Carbon::now()->endOfDay(), function () use ($monthly, $latestAssessment, $fallbackBalance, $dateKey) {
+        return Cache::remember($cacheKey, Carbon::now()->endOfDay(), function () use ($user, $monthly, $latestAssessment, $fallbackBalance, $dateKey) {
+            // Use assessment data as baseline, overlay with actual transaction data if available
+            $assessmentIncome = (float) ($latestAssessment?->monthly_income ?? 0);
+            $assessmentExpense = (float) ($latestAssessment?->monthly_expense ?? 0);
+
+            // Prefer actual transaction data, but only if user has meaningful data this month
+            $hasTransactions = $monthly['income'] > 0 || $monthly['expense'] > 0;
+            $income = $hasTransactions ? (float) $monthly['income'] : $assessmentIncome;
+            $expense = $hasTransactions ? (float) $monthly['expense'] : $assessmentExpense;
+
+            // If mid-month and only expense recorded (no income yet), blend with assessment
+            // to avoid false alarm from incomplete month data
+            if ($hasTransactions && $income == 0 && $expense > 0 && $assessmentIncome > 0) {
+                $income = $assessmentIncome;
+            }
+
+            $actualBalance = $income - $expense;
+            $savings = (float) ($latestAssessment?->actual_savings ?? max($actualBalance, 0));
+
             $payload = [
-                'income' => (float) ($monthly['income'] > 0 ? $monthly['income'] : ($latestAssessment?->monthly_income ?? 0)),
-                'expense' => (float) ($monthly['expense'] > 0 ? $monthly['expense'] : ($latestAssessment?->monthly_expense ?? 0)),
-                'savings' => (float) ($latestAssessment?->actual_savings ?? max($monthly['balance'], 0)),
+                'income' => $income,
+                'expense' => $expense,
+                'savings' => $savings,
                 'target_tabungan' => (float) ($latestAssessment?->budget_goal ?? 0),
                 'loan_payment' => (float) ($latestAssessment?->loan_payment ?? 0),
                 'emergency_fund' => (float) ($latestAssessment?->emergency_fund ?? 0),
@@ -152,9 +170,13 @@ class FinancialInsightService
                     ]);
                 }
 
+                // Validate ML warning_probability is in 0-1 range
+                $mlWarningProb = (float) $mlResult['warning_probability'];
+                $mlWarningProb = min(1.0, max(0.0, $mlWarningProb));
+
                 return [
-                    'next_month_balance' => $adjustedBalance,
-                    'warning_probability' => (float) $mlResult['warning_probability'],
+                    'next_month_balance' => round($adjustedBalance, 2),
+                    'warning_probability' => round($mlWarningProb, 4),
                     'warning_flag' => (int) $mlResult['warning_flag'],
                     'recommendations' => array_values($mlResult['recommendations'] ?? []),
                     'currency' => 'IDR',
@@ -164,24 +186,87 @@ class FinancialInsightService
                 ];
             }
 
-            $expenseRatio = $payload['income'] > 0 ? $payload['expense'] / $payload['income'] : 1;
-            $warningProbability = min(0.95, max(0.05, ($expenseRatio * 0.55) + ($payload['loan_payment'] > 0 ? 0.15 : 0)));
+            // --- Rule-based fallback with improved logic ---
+            $expenseRatio = $income > 0 ? $expense / $income : 0.5;
+            $loanBurden = ($income > 0 && $payload['loan_payment'] > 0)
+                ? $payload['loan_payment'] / $income
+                : 0;
+
+            // Multi-factor warning probability
+            $warningProbability = 0.0;
+            $warningProbability += min(0.45, $expenseRatio * 0.45);  // expense ratio contributes up to 45%
+            $warningProbability += min(0.20, $loanBurden * 0.60);    // loan burden contributes up to 20%
+
+            // Savings buffer reduces warning
+            $savingsBuffer = ($income > 0 && $savings > 0) ? min(0.15, ($savings / $income) * 0.15) : 0;
+            $warningProbability -= $savingsBuffer;
+
+            // Emergency fund reduces warning
+            $emergencyBuffer = ($expense > 0 && $payload['emergency_fund'] >= $expense * 3) ? 0.10 : 0;
+            $warningProbability -= $emergencyBuffer;
+
+            $warningProbability = round(min(0.95, max(0.05, $warningProbability)), 4);
+
+            // Better next month balance prediction: use weighted recent history
+            $monthlyChart = collect($this->buildMonthlyChart($user, 3));
+            $nonZeroBalances = $monthlyChart->pluck('balance')->filter(fn($b) => $b != 0);
+            if ($nonZeroBalances->isNotEmpty()) {
+                // Weighted average: recent months matter more
+                $weights = [];
+                $values = $nonZeroBalances->values()->all();
+                $count = count($values);
+                for ($i = 0; $i < $count; $i++) {
+                    $weights[] = $i + 1; // 1, 2, 3... (latest gets highest weight)
+                }
+                $weightedSum = 0;
+                $weightTotal = array_sum($weights);
+                for ($i = 0; $i < $count; $i++) {
+                    $weightedSum += $values[$i] * $weights[$i];
+                }
+                $predictedBalance = round($weightedSum / $weightTotal, 2);
+            } else {
+                // No transaction history, estimate from assessment
+                $predictedBalance = round($income - $expense, 2);
+            }
 
             return [
-                'next_month_balance' => $fallbackBalance,
-                'warning_probability' => round($warningProbability, 4),
-                'warning_flag' => $warningProbability >= 0.65 || $fallbackBalance < 0 ? 1 : 0,
-                'recommendations' => [
-                    $fallbackBalance < 0
-                    ? 'Prioritaskan pemangkasan pengeluaran variabel sebelum akhir bulan.'
-                    : 'Review saldo prediksi harian dan jaga transaksi besar tetap terencana.',
-                ],
+                'next_month_balance' => $predictedBalance,
+                'warning_probability' => $warningProbability,
+                'warning_flag' => ($warningProbability >= 0.55 || $predictedBalance < 0) ? 1 : 0,
+                'recommendations' => $this->buildPredictionRecommendations($expenseRatio, $predictedBalance, $loanBurden, $savingsBuffer),
                 'currency' => 'IDR',
                 'source' => 'rule-based',
                 'generated_for' => $dateKey,
                 'payload' => $payload,
             ];
         });
+    }
+
+    private function buildPredictionRecommendations(float $expenseRatio, float $predictedBalance, float $loanBurden, float $savingsBuffer): array
+    {
+        $recs = [];
+
+        if ($predictedBalance < 0) {
+            $recs[] = 'Saldo bulan depan diprediksi negatif. Prioritaskan pemangkasan pengeluaran variabel.';
+        }
+
+        if ($expenseRatio >= 0.8) {
+            $recs[] = 'Rasio pengeluaran tinggi (' . round($expenseRatio * 100) . '%). Evaluasi pengeluaran non-esensial.';
+        }
+
+        if ($loanBurden >= 0.3) {
+            $recs[] = 'Beban cicilan cukup besar. Pertimbangkan restrukturisasi atau percepatan pelunasan.';
+        }
+
+        if ($savingsBuffer < 0.05) {
+            $recs[] = 'Buffer tabungan masih tipis. Sisihkan minimal 10% income untuk tabungan darurat.';
+        }
+
+        if (empty($recs)) {
+            $recs[] = 'Kondisi keuangan cukup stabil. Jaga konsistensi dan review target bulanan.';
+        }
+
+        return $recs;
     }
 
     public function budgetStatus(User $user): array
@@ -330,17 +415,42 @@ class FinancialInsightService
     {
         $income = max(0, (float) ($payload['income'] ?? 0));
         $expense = max(0, (float) ($payload['expense'] ?? 0));
-        $savings = max(0, (float) ($payload['savings'] ?? 0));
-        $emergencyFund = max(0, (float) ($payload['emergency_fund'] ?? 0));
         $loanPayment = max(0, (float) ($payload['loan_payment'] ?? 0));
 
-        $maxExpected = max($income * 3, $income + $savings + $emergencyFund);
-        $minExpected = -1 * max($expense * 2, $expense + $loanPayment);
+        // More realistic bounds: max is 1.5x net income, min is negative of total obligations
+        $netIncome = $income - $expense;
+        $maxExpected = max($income * 1.5, abs($netIncome) * 2);
+        $minExpected = -1 * ($expense + $loanPayment);
 
         return [
             'min' => $minExpected,
             'max' => $maxExpected,
         ];
+    }
+
+    private function estimateNextMonthBalance(Collection $monthlyChart, array $currentMonthSummary): float
+    {
+        // Only consider months with actual data (non-zero activity)
+        $activeMonths = $monthlyChart->filter(fn($row) => $row['income'] > 0 || $row['expense'] > 0);
+
+        if ($activeMonths->isEmpty()) {
+            // No history at all, use current month summary
+            return round($currentMonthSummary['balance'], 2);
+        }
+
+        // Weighted average favoring recent months
+        $values = $activeMonths->pluck('balance')->values()->all();
+        $count = count($values);
+        $weightedSum = 0;
+        $weightTotal = 0;
+
+        for ($i = 0; $i < $count; $i++) {
+            $weight = $i + 1;
+            $weightedSum += $values[$i] * $weight;
+            $weightTotal += $weight;
+        }
+
+        return round($weightedSum / $weightTotal, 2);
     }
 
     private function buildMonthlyChart(User $user, int $months): array
