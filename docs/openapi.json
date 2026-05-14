@@ -20,7 +20,8 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT"
+        "bearerFormat": "Sanctum",
+        "description": "Paste the token returned by /auth/login or /auth/register. Use the token value only; Swagger sends it as Authorization: Bearer <token>."
       }
     },
     "schemas": {
@@ -145,7 +146,8 @@
         "summary": "Get current user",
         "security": [{ "BearerAuth": [] }],
         "responses": {
-          "200": { "description": "User profile" }
+          "200": { "description": "User profile" },
+          "401": { "description": "Unauthenticated" }
         }
       }
     },

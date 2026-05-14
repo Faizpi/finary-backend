@@ -8,11 +8,11 @@
   "servers": [
     {
       "url": "/api",
-      "description": "Same-origin"
+      "description": "Same-origin (/api on this host)"
     },
     {
       "url": "https://api-finary.my.id/api",
-      "description": "Production (HTTPS)"
+      "description": "Production HTTPS (live domain)"
     }
   ],
   "components": {
@@ -20,7 +20,8 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT"
+        "bearerFormat": "Sanctum",
+        "description": "Paste the token returned by /auth/login or /auth/register. Use the token value only; Swagger sends it as Authorization: Bearer <token>."
       }
     },
     "schemas": {
@@ -45,49 +46,54 @@
       "AssessmentRequest": {
         "type": "object",
         "properties": {
-          "age": { "type": "integer" },
-          "income": { "type": "number" },
-          "expenses": { "type": "number" },
-          "savings": { "type": "number" },
+          "monthly_income": { "type": "number" },
+          "monthly_expense": { "type": "number" },
+          "actual_savings": { "type": "number" },
+          "budget_goal": { "type": "number" },
+          "emergency_fund": { "type": "number" },
           "loan_payment": { "type": "number" }
         }
       },
       "TransactionRequest": {
         "type": "object",
         "properties": {
-          "title": { "type": "string" },
-          "amount": { "type": "number" },
           "type": { "type": "string", "enum": ["income", "expense"] },
           "category": { "type": "string" },
-          "date": { "type": "string", "format": "date" }
+          "amount": { "type": "number" },
+          "transaction_date": { "type": "string", "format": "date" },
+          "note": { "type": "string" }
         }
       },
       "BudgetRequest": {
         "type": "object",
         "properties": {
           "category": { "type": "string" },
-          "limit": { "type": "number" }
+          "period": { "type": "string", "pattern": "^\\d{4}-\\d{2}$" },
+          "monthly_limit": { "type": "number" }
         }
       },
       "ForumPostRequest": {
         "type": "object",
         "properties": {
           "title": { "type": "string" },
-          "content": { "type": "string" }
+          "body": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } }
         }
       },
       "ForumReplyRequest": {
         "type": "object",
         "properties": {
-          "content": { "type": "string" }
+          "body": { "type": "string" }
         }
       },
       "SideHustleRequest": {
         "type": "object",
         "properties": {
-          "age": { "type": "integer" },
-          "interests": { "type": "array", "items": { "type": "string" } },
-          "skills": { "type": "array", "items": { "type": "string" } }
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "experience_level": { "type": "string" },
+          "interest_category": { "type": "string" },
+          "available_hours_per_week": { "type": "integer" },
+          "classification": { "type": "string", "enum": ["survival", "stable", "growth"] }
         }
       }
     }
@@ -140,7 +146,8 @@
         "summary": "Get current user",
         "security": [{ "BearerAuth": [] }],
         "responses": {
-          "200": { "description": "User profile" }
+          "200": { "description": "User profile" },
+          "401": { "description": "Unauthenticated" }
         }
       }
     },

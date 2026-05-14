@@ -21,7 +21,6 @@ Route::get('/docs', function () {
     return view('docs');
 });
 
-<<<<<<< HEAD
 Route::get('/docs/openapi.json', function () {
     return response()->file(
         base_path('docs/openapi.json'),
@@ -29,8 +28,6 @@ Route::get('/docs/openapi.json', function () {
     );
 });
 
-=======
->>>>>>> 7bbab614c4c71565bcfb44786a3536493195db2f
 Route::get('/docs/download', function () {
     return response()->download(
         base_path('docs/API.md'),
