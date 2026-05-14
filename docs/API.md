@@ -1,8 +1,9 @@
 # Finary API Documentation
 
-Base URL (local):
+Base URL:
 
-- http://127.0.0.1:8000/api
+- Production: https://api-finary.my.id/api
+- Same-origin dari halaman docs: /api
 
 Authentication:
 
@@ -205,13 +206,15 @@ Validasi error memakai format standar Laravel:
 
 Login:
 
-curl -X POST http://127.0.0.1:8000/api/auth/login \
+curl -X POST https://api-finary.my.id/api/auth/login \
  -H "Content-Type: application/json" \
+ -H "Accept: application/json" \
  -d '{"email":"demo@finary.app","password":"password123"}'
 
 Tambah transaksi:
 
-curl -X POST http://127.0.0.1:8000/api/transactions \
+curl -X POST https://api-finary.my.id/api/transactions \
  -H "Authorization: Bearer YOUR_TOKEN" \
  -H "Content-Type: application/json" \
+ -H "Accept: application/json" \
  -d '{"type":"expense","category":"Makanan","amount":45000,"transaction_date":"2026-04-21"}'

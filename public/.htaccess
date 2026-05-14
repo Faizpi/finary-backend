@@ -5,6 +5,12 @@
 
     RewriteEngine On
 
+    # If this file is copied to a shared-hosting web root, keep Laravel
+    # internals and deployment helpers from being served directly.
+    RewriteRule (^|/)\.(?!well-known(?:/|$)) - [F,L]
+    RewriteRule ^(app|bootstrap|config|database|public|resources|routes|storage|tests|vendor)(/|$) - [F,L]
+    RewriteRule ^(artisan|composer\.(json|lock)|phpunit\.xml|README\.md)$ - [F,L]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
