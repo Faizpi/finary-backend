@@ -121,19 +121,31 @@ class FinancialInsightService
         $cacheKey = "finary:predict:{$user->id}:{$dateKey}";
 
         return Cache::remember($cacheKey, Carbon::now()->endOfDay(), function () use ($user, $monthly, $latestAssessment, $fallbackBalance, $dateKey) {
-            // Use assessment data as baseline, overlay with actual transaction data if available
+            // Use assessment as the user's monthly plan, then overlay current-month
+            // transactions by pace. This prevents a single expense from incorrectly
+            // increasing predicted balance while still keeping early-month data sane.
             $assessmentIncome = (float) ($latestAssessment?->monthly_income ?? 0);
             $assessmentExpense = (float) ($latestAssessment?->monthly_expense ?? 0);
+            $actualIncome = (float) ($monthly['income'] ?? 0);
+            $actualExpense = (float) ($monthly['expense'] ?? 0);
 
-            // Prefer actual transaction data, but only if user has meaningful data this month
-            $hasTransactions = $monthly['income'] > 0 || $monthly['expense'] > 0;
-            $income = $hasTransactions ? (float) $monthly['income'] : $assessmentIncome;
-            $expense = $hasTransactions ? (float) $monthly['expense'] : $assessmentExpense;
+            $now = Carbon::now();
+            $daysElapsed = max(1, $now->day);
+            $daysInMonth = max(1, $now->daysInMonth);
+            $monthProgress = min(1.0, max(0.05, $daysElapsed / $daysInMonth));
 
-            // If mid-month and only expense recorded (no income yet), blend with assessment
-            // to avoid false alarm from incomplete month data
-            if ($hasTransactions && $income == 0 && $expense > 0 && $assessmentIncome > 0) {
-                $income = $assessmentIncome;
+            $projectedIncomeFromTransactions = $actualIncome > 0 ? $actualIncome / $monthProgress : 0;
+            $projectedExpenseFromTransactions = $actualExpense > 0 ? $actualExpense / $monthProgress : 0;
+
+            $income = max($assessmentIncome, $actualIncome, min($projectedIncomeFromTransactions, $assessmentIncome * 1.3));
+            $expense = max($assessmentExpense, $actualExpense, $projectedExpenseFromTransactions);
+
+            if ($assessmentIncome <= 0) {
+                $income = max($actualIncome, $projectedIncomeFromTransactions);
+            }
+
+            if ($assessmentExpense <= 0) {
+                $expense = max($actualExpense, $projectedExpenseFromTransactions);
             }
 
             $actualBalance = $income - $expense;
@@ -390,7 +402,7 @@ class FinancialInsightService
             [
                 'key'         => 'first_saver',
                 'name'        => 'First Saver',
-                'description' => 'Raih cashflow positif setiap bulan. Lv1=1 bln, Lv6=6 bln.',
+                'description' => 'Menandai progres saat kamu berhasil mulai menyisihkan uang.',
                 'unlocked'    => $firstSaverLevel > 0,
                 'level'       => $firstSaverLevel,
                 'progress'    => $monthsPositive,
@@ -399,7 +411,7 @@ class FinancialInsightService
             [
                 'key'         => 'saving_streak',
                 'name'        => 'Saving Streak',
-                'description' => 'Jaga saldo positif berturut-turut. Lv1=1 bln, Lv6=6 bln beruntun.',
+                'description' => 'Menunjukkan konsistensi mempertahankan kebiasaan menabung.',
                 'unlocked'    => $savingStreakLevel > 0,
                 'level'       => $savingStreakLevel,
                 'progress'    => $currentStreak,
@@ -408,7 +420,7 @@ class FinancialInsightService
             [
                 'key'         => 'budget_keeper',
                 'name'        => 'Budget Keeper',
-                'description' => 'Tidak overbudget di semua kantong. Lv1=1 bln, Lv6=6 bln berturut.',
+                'description' => 'Menunjukkan kemampuan menjaga pengeluaran tetap sesuai budget.',
                 'unlocked'    => $budgetKeeperLevel > 0,
                 'level'       => $budgetKeeperLevel,
                 'progress'    => $budgetKeeperMonths,
@@ -417,7 +429,7 @@ class FinancialInsightService
             [
                 'key'         => 'expense_tracker',
                 'name'        => 'Expense Tracker',
-                'description' => 'Catat transaksi secara konsisten. Lv1=5, Lv2=20, Lv3=50, Lv4=100, Lv5=200, Lv6=500.',
+                'description' => 'Membantu melihat konsistensi mencatat pengeluaran.',
                 'unlocked'    => $expenseTrackerLevel > 0,
                 'level'       => $expenseTrackerLevel,
                 'progress'    => $totalTx,
@@ -426,7 +438,7 @@ class FinancialInsightService
             [
                 'key'         => 'side_hustler',
                 'name'        => 'Side Hustler',
-                'description' => 'Kumpulkan pemasukan dari side hustle/freelance. Lv1=1, Lv2=3, Lv3=5, Lv4=10, Lv5=20, Lv6=50.',
+                'description' => 'Menandai progres eksplorasi peluang penghasilan tambahan.',
                 'unlocked'    => $sideHustlerLevel > 0,
                 'level'       => $sideHustlerLevel,
                 'progress'    => $sideHustleIncome,
@@ -435,7 +447,7 @@ class FinancialInsightService
             [
                 'key'         => 'daily_logger',
                 'name'        => 'Daily Logger',
-                'description' => 'Aktif mencatat tiap hari bulan ini. Lv1=3 hari, Lv2=7, Lv3=10, Lv4=15, Lv5=20, Lv6=25.',
+                'description' => 'Mengukur kebiasaan rutin mencatat aktivitas keuangan.',
                 'unlocked'    => $dailyLoggerLevel > 0,
                 'level'       => $dailyLoggerLevel,
                 'progress'    => $distinctDaysThisMonth,
@@ -444,7 +456,7 @@ class FinancialInsightService
             [
                 'key'         => 'comeback',
                 'name'        => 'Comeback',
-                'description' => 'Bangkit dari defisit ke surplus. Lv1=1x, Lv6=6x.',
+                'description' => 'Mengapresiasi saat kamu kembali aktif mengelola keuangan.',
                 'unlocked'    => $comebackLevel > 0,
                 'level'       => $comebackLevel,
                 'progress'    => $comebackCount,
