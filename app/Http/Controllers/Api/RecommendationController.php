@@ -18,13 +18,20 @@ class RecommendationController extends Controller
         $validated = $request->validated();
 
         $latestAssessment = $request->user()->assessments()->latest()->first();
-        $skills = $validated['skills'] ?? ($latestAssessment?->skills ?? []);
+        $sideHustleContext = $latestAssessment?->metadata['side_hustle_context'] ?? [];
+
+        $skills = $validated['skills']
+            ?? ($latestAssessment?->skills ?? $sideHustleContext['skills'] ?? []);
 
         $payload = [
-            'experience_level'         => $validated['experience_level'] ?? 'Beginner',
-            'interest_category'        => $validated['interest_category'] ?? $this->inferInterestCategory($skills),
+            'experience_level' => $validated['experience_level']
+                ?? ($sideHustleContext['experience_level'] ?? 'Beginner'),
+            'interest_category' => $validated['interest_category']
+                ?? ($sideHustleContext['interest_category'] ?? $this->inferInterestCategory($skills)),
             'available_hours_per_week' => $validated['available_hours_per_week']
-                ?? (int) ($latestAssessment?->available_hours_per_week ?? 10),
+                ?? (int) ($latestAssessment?->available_hours_per_week
+                    ?? $sideHustleContext['available_hours_per_week']
+                    ?? 10),
             'skills'         => $skills,
             'classification' => $validated['classification'] ?? ($latestAssessment?->classification ?? 'stable'),
         ];

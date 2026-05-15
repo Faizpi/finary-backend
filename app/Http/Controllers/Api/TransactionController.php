@@ -10,6 +10,7 @@ use App\Models\Transaction;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class TransactionController extends Controller
 {
@@ -26,14 +27,26 @@ class TransactionController extends Controller
             $query->whereBetween('transaction_date', [$start, $end]);
         }
 
+        $perPage = min((int) $request->query('per_page', 30), 100);
+        $paginated = $query->paginate($perPage);
+
         return response()->json([
-            'data' => TransactionResource::collection($query->get()),
+            'data' => TransactionResource::collection($paginated->items()),
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'last_page'    => $paginated->lastPage(),
+                'per_page'     => $paginated->perPage(),
+                'total'        => $paginated->total(),
+                'has_more'     => $paginated->hasMorePages(),
+            ],
         ]);
     }
 
     public function store(StoreTransactionRequest $request): JsonResponse
     {
         $transaction = $request->user()->transactions()->create($request->validated());
+
+        $this->invalidatePredictionCache($request->user()->id);
 
         return response()->json([
             'message' => 'Transaksi berhasil ditambahkan.',
@@ -46,6 +59,8 @@ class TransactionController extends Controller
         $this->authorizeOwnership($request, $transaction);
         $transaction->update($request->validated());
 
+        $this->invalidatePredictionCache($request->user()->id);
+
         return response()->json([
             'message' => 'Transaksi berhasil diperbarui.',
             'data'    => new TransactionResource($transaction->fresh()),
@@ -56,6 +71,8 @@ class TransactionController extends Controller
     {
         $this->authorizeOwnership($request, $transaction);
         $transaction->delete();
+
+        $this->invalidatePredictionCache($request->user()->id);
 
         return response()->json([
             'message' => 'Transaksi dihapus.',
@@ -75,5 +92,11 @@ class TransactionController extends Controller
             $date->copy()->startOfMonth()->toDateString(),
             $date->copy()->endOfMonth()->toDateString(),
         ];
+    }
+
+    private function invalidatePredictionCache(int $userId): void
+    {
+        $dateKey = Carbon::now()->toDateString();
+        Cache::forget("finary:predict:{$userId}:{$dateKey}");
     }
 }

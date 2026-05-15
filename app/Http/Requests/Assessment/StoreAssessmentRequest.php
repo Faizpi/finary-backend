@@ -14,15 +14,21 @@ class StoreAssessmentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'monthly_income'  => ['required', 'numeric', 'min:1'],
-            'monthly_expense' => ['required', 'numeric', 'min:0'],
-            'actual_savings'  => ['required', 'numeric', 'min:0'],
-            'budget_goal'     => ['required', 'numeric', 'min:0'],
-            'emergency_fund'  => ['required', 'numeric', 'min:0'],
-            'loan_payment'    => ['nullable', 'numeric', 'min:0'],
-            'classification'  => ['nullable', 'string', 'max:40'],
-            'ml_score'        => ['nullable', 'numeric'],
-            'ml_explanation'  => ['nullable', 'string', 'max:500'],
+            'monthly_income'           => ['required', 'numeric', 'min:1'],
+            'monthly_expense'          => ['required', 'numeric', 'min:0'],
+            'actual_savings'           => ['required', 'numeric', 'min:0'],
+            'budget_goal'              => ['required', 'numeric', 'min:0'],
+            'emergency_fund'           => ['required', 'numeric', 'min:0'],
+            'loan_payment'             => ['nullable', 'numeric', 'min:0'],
+            'classification'           => ['nullable', 'string', 'max:40'],
+            'ml_score'                 => ['nullable', 'numeric'],
+            'ml_explanation'           => ['nullable', 'string', 'max:500'],
+            // Side-hustle context fields
+            'skills'                   => ['nullable', 'array', 'max:20'],
+            'skills.*'                 => ['string', 'max:40'],
+            'experience_level'         => ['nullable', 'string', 'max:40'],
+            'interest_category'        => ['nullable', 'string', 'max:80'],
+            'available_hours_per_week' => ['nullable', 'integer', 'min:0', 'max:168'],
         ];
     }
 }

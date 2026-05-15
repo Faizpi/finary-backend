@@ -101,4 +101,20 @@ class AuthController extends Controller
             'message' => 'Logout berhasil.',
         ]);
     }
+
+    public function updateAvatar(Request $request): JsonResponse
+    {
+        $request->validate([
+            'avatar' => ['required', 'string', 'max:300000'],
+        ]);
+
+        $user = $request->user();
+        $user->avatar = $request->input('avatar');
+        $user->save();
+
+        return response()->json([
+            'message' => 'Avatar diperbarui.',
+            'user'    => new UserResource($user),
+        ]);
+    }
 }

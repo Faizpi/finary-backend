@@ -14,8 +14,9 @@ class ForumPostResource extends JsonResource
             'body'       => $this->body,
             'tags'       => $this->tags,
             'user'       => $this->whenLoaded('user', fn () => [
-                'id'   => $this->user->id,
-                'name' => $this->user->name,
+                'id'     => $this->user->id,
+                'name'   => $this->user->name,
+                'avatar' => $this->user->avatar,
             ]),
             'replies'    => ForumReplyResource::collection($this->whenLoaded('replies')),
             'created_at' => $this->created_at,

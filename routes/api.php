@@ -36,6 +36,7 @@ Route::prefix('auth')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/logout', [AuthController::class, 'logout']);
+        Route::post('/avatar', [AuthController::class, 'updateAvatar']);
     });
 });
 
@@ -44,8 +45,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::prefix('assessment')->group(function () {
         Route::get('/latest', [AssessmentController::class, 'latest']);
-        Route::post('/', [AssessmentController::class, 'store']);
+        Route::post('/', [AssessmentController::class, 'store'])->middleware('throttle:6,1');
     });
+
+    Route::patch('/assessment/latest', [AssessmentController::class, 'patchLatest']);
 
     Route::get('/transactions', [TransactionController::class, 'index']);
     Route::post('/transactions', [TransactionController::class, 'store']);
@@ -63,7 +66,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/leaderboard', [InsightController::class, 'leaderboard']);
     });
 
-    Route::post('/recommendations/side-hustles', [RecommendationController::class, 'sideHustles']);
+    Route::post('/recommendations/side-hustles', [RecommendationController::class, 'sideHustles'])->middleware('throttle:6,1');
 
     Route::get('/forum/posts', [ForumController::class, 'index']);
     Route::post('/forum/posts', [ForumController::class, 'store']);

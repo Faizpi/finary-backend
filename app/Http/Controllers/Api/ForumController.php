@@ -17,8 +17,8 @@ class ForumController extends Controller
     {
         $posts = ForumPost::query()
             ->with([
-                'user:id,name',
-                'replies.user:id,name',
+                'user:id,name,avatar',
+                'replies.user:id,name,avatar',
             ])
             ->latest()
             ->limit(20)
@@ -32,7 +32,7 @@ class ForumController extends Controller
     public function store(StorePostRequest $request): JsonResponse
     {
         $post = $request->user()->forumPosts()->create($request->validated());
-        $post->load('user:id,name');
+        $post->load('user:id,name,avatar');
 
         return response()->json([
             'message' => 'Postingan forum berhasil dibuat.',
@@ -47,7 +47,7 @@ class ForumController extends Controller
             'body'    => $request->validated('body'),
         ]);
 
-        $reply->load('user:id,name');
+        $reply->load('user:id,name,avatar');
 
         return response()->json([
             'message' => 'Balasan berhasil dikirim.',

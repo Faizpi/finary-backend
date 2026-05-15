@@ -173,11 +173,13 @@ class FinancialInsightService
                 // Validate ML warning_probability is in 0-1 range
                 $mlWarningProb = (float) $mlResult['warning_probability'];
                 $mlWarningProb = min(1.0, max(0.0, $mlWarningProb));
+                $warningFlag = (int) $mlResult['warning_flag'];
 
                 return [
                     'next_month_balance' => round($adjustedBalance, 2),
                     'warning_probability' => round($mlWarningProb, 4),
-                    'warning_flag' => (int) $mlResult['warning_flag'],
+                    'warning_flag' => $warningFlag,
+                    'warning_text' => $this->buildWarningText($warningFlag, $mlWarningProb, $adjustedBalance),
                     'recommendations' => array_values($mlResult['recommendations'] ?? []),
                     'currency' => 'IDR',
                     'source' => 'ml',
@@ -229,10 +231,13 @@ class FinancialInsightService
                 $predictedBalance = round($income - $expense, 2);
             }
 
+            $warningFlag = ($warningProbability >= 0.55 || $predictedBalance < 0) ? 1 : 0;
+
             return [
                 'next_month_balance' => $predictedBalance,
                 'warning_probability' => $warningProbability,
-                'warning_flag' => ($warningProbability >= 0.55 || $predictedBalance < 0) ? 1 : 0,
+                'warning_flag' => $warningFlag,
+                'warning_text' => $this->buildWarningText($warningFlag, $warningProbability, $predictedBalance),
                 'recommendations' => $this->buildPredictionRecommendations($expenseRatio, $predictedBalance, $loanBurden, $savingsBuffer),
                 'currency' => 'IDR',
                 'source' => 'rule-based',
@@ -240,6 +245,25 @@ class FinancialInsightService
                 'payload' => $payload,
             ];
         });
+    }
+
+    private function buildWarningText(int $warningFlag, float $warningProbability, float $predictedBalance): string
+    {
+        if ($warningFlag === 0) {
+            return 'Kondisi keuangan bulan depan diprediksi terkendali. Pertahankan pola pengeluaran saat ini.';
+        }
+
+        $texts = [];
+
+        if ($predictedBalance < 0) {
+            $texts[] = 'Saldo bulan depan diprediksi negatif — prioritaskan pemangkasan pengeluaran variabel segera.';
+        } elseif ($warningProbability >= 0.75) {
+            $texts[] = 'Risiko defisit bulan depan sangat tinggi (' . round($warningProbability * 100) . '%). Tinjau pengeluaran besar sekarang.';
+        } else {
+            $texts[] = 'Ada indikasi tekanan keuangan bulan depan (' . round($warningProbability * 100) . '%). Kurangi pengeluaran non-esensial.';
+        }
+
+        return implode(' ', $texts);
     }
 
     private function buildPredictionRecommendations(float $expenseRatio, float $predictedBalance, float $loanBurden, float $savingsBuffer): array
@@ -307,9 +331,11 @@ class FinancialInsightService
         $chart = collect($this->buildMonthlyChart($user, 6));
         $budgetRows = collect($this->budgetStatus($user));
 
-        $monthsPositive = $chart->where('balance', '>', 0)->count();
-        $hasDeficit = $chart->where('balance', '<', 0)->isNotEmpty();
-        $latestPositive = ($chart->last()['balance'] ?? 0) > 0;
+        // ── Raw counts ────────────────────────────────────────────────────────
+        $monthsPositive  = $chart->where('balance', '>', 0)->count();
+        $hasDeficit      = $chart->where('balance', '<', 0)->isNotEmpty();
+        $latestPositive  = ($chart->last()['balance'] ?? 0) > 0;
+        $totalTx         = $transactions->count();
 
         $distinctDaysThisMonth = $transactions
             ->whereBetween('transaction_date', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
@@ -318,88 +344,255 @@ class FinancialInsightService
             ->unique()
             ->count();
 
-        $unlocked = [
+        $sideHustleIncome = $transactions
+            ->where('type', 'income')
+            ->filter(fn(Transaction $t) =>
+                str_contains(strtolower($t->category), 'side') ||
+                str_contains(strtolower($t->category), 'free')
+            )->count();
+
+        // Count how many times user recovered from deficit (comeback count)
+        $comebackCount = 0;
+        $wasDeficit    = false;
+        foreach ($chart as $row) {
+            if (($row['balance'] ?? 0) < 0) {
+                $wasDeficit = true;
+            } elseif ($wasDeficit && ($row['balance'] ?? 0) > 0) {
+                $comebackCount++;
+                $wasDeficit = false;
+            }
+        }
+
+        // Current positive streak length
+        $currentStreak = 0;
+        foreach (array_reverse($chart->all()) as $row) {
+            if (($row['balance'] ?? 0) > 0) {
+                $currentStreak++;
+            } else {
+                break;
+            }
+        }
+
+        // Budget keeper: count consecutive months with no overbudget
+        // We approximate using the 6-month chart — check each month's budget
+        $budgetKeeperMonths = $this->countBudgetKeeperMonths($user, 6);
+
+        // ── Level calculators (1-6, 0 = locked) ──────────────────────────────
+        $firstSaverLevel   = $this->levelFromThresholds($monthsPositive,  [1, 2, 3, 4, 5, 6]);
+        $savingStreakLevel  = $this->levelFromThresholds($currentStreak,   [1, 2, 3, 4, 5, 6]);
+        $budgetKeeperLevel = $this->levelFromThresholds($budgetKeeperMonths, [1, 2, 3, 4, 5, 6]);
+        $expenseTrackerLevel = $this->levelFromThresholds($totalTx,        [5, 20, 50, 100, 200, 500]);
+        $sideHustlerLevel  = $this->levelFromThresholds($sideHustleIncome, [1, 3, 5, 10, 20, 50]);
+        $dailyLoggerLevel  = $this->levelFromThresholds($distinctDaysThisMonth, [3, 7, 10, 15, 20, 25]);
+        $comebackLevel     = $this->levelFromThresholds($comebackCount,    [1, 2, 3, 4, 5, 6]);
+
+        $badges = [
             [
-                'key' => 'first_saver',
-                'name' => 'First Saver',
-                'description' => 'Bulan positif pertama berhasil dicapai.',
-                'unlocked' => $monthsPositive >= 1,
+                'key'         => 'first_saver',
+                'name'        => 'First Saver',
+                'description' => 'Raih cashflow positif setiap bulan. Lv1=1 bln, Lv6=6 bln.',
+                'unlocked'    => $firstSaverLevel > 0,
+                'level'       => $firstSaverLevel,
+                'progress'    => $monthsPositive,
+                'next_target' => $this->nextTarget($monthsPositive, [1, 2, 3, 4, 5, 6]),
             ],
             [
-                'key' => 'saving_streak',
-                'name' => 'Saving Streak',
-                'description' => '3 bulan beruntun saldo akhir positif.',
-                'unlocked' => $this->hasPositiveStreak($chart, 3),
+                'key'         => 'saving_streak',
+                'name'        => 'Saving Streak',
+                'description' => 'Jaga saldo positif berturut-turut. Lv1=1 bln, Lv6=6 bln beruntun.',
+                'unlocked'    => $savingStreakLevel > 0,
+                'level'       => $savingStreakLevel,
+                'progress'    => $currentStreak,
+                'next_target' => $this->nextTarget($currentStreak, [1, 2, 3, 4, 5, 6]),
             ],
             [
-                'key' => 'budget_keeper',
-                'name' => 'Budget Keeper',
-                'description' => 'Tidak ada kategori overbudget bulan ini.',
-                'unlocked' => $budgetRows->isNotEmpty() && $budgetRows->where('is_overbudget', true)->isEmpty(),
+                'key'         => 'budget_keeper',
+                'name'        => 'Budget Keeper',
+                'description' => 'Tidak overbudget di semua kantong. Lv1=1 bln, Lv6=6 bln berturut.',
+                'unlocked'    => $budgetKeeperLevel > 0,
+                'level'       => $budgetKeeperLevel,
+                'progress'    => $budgetKeeperMonths,
+                'next_target' => $this->nextTarget($budgetKeeperMonths, [1, 2, 3, 4, 5, 6]),
             ],
             [
-                'key' => 'expense_tracker',
-                'name' => 'Expense Tracker',
-                'description' => 'Minimal 20 transaksi sudah tercatat.',
-                'unlocked' => $transactions->count() >= 20,
+                'key'         => 'expense_tracker',
+                'name'        => 'Expense Tracker',
+                'description' => 'Catat transaksi secara konsisten. Lv1=5, Lv2=20, Lv3=50, Lv4=100, Lv5=200, Lv6=500.',
+                'unlocked'    => $expenseTrackerLevel > 0,
+                'level'       => $expenseTrackerLevel,
+                'progress'    => $totalTx,
+                'next_target' => $this->nextTarget($totalTx, [5, 20, 50, 100, 200, 500]),
             ],
             [
-                'key' => 'side_hustler',
-                'name' => 'Side Hustler',
-                'description' => 'Sudah punya pemasukan kategori side hustle/freelance.',
-                'unlocked' => $transactions
-                    ->where('type', 'income')
-                    ->filter(fn(Transaction $t) => str_contains(strtolower($t->category), 'side') || str_contains(strtolower($t->category), 'free'))
-                    ->isNotEmpty(),
+                'key'         => 'side_hustler',
+                'name'        => 'Side Hustler',
+                'description' => 'Kumpulkan pemasukan dari side hustle/freelance. Lv1=1, Lv2=3, Lv3=5, Lv4=10, Lv5=20, Lv6=50.',
+                'unlocked'    => $sideHustlerLevel > 0,
+                'level'       => $sideHustlerLevel,
+                'progress'    => $sideHustleIncome,
+                'next_target' => $this->nextTarget($sideHustleIncome, [1, 3, 5, 10, 20, 50]),
             ],
             [
-                'key' => 'daily_logger',
-                'name' => 'Daily Logger',
-                'description' => 'Aktif mencatat setidaknya 10 hari dalam bulan ini.',
-                'unlocked' => $distinctDaysThisMonth >= 10,
+                'key'         => 'daily_logger',
+                'name'        => 'Daily Logger',
+                'description' => 'Aktif mencatat tiap hari bulan ini. Lv1=3 hari, Lv2=7, Lv3=10, Lv4=15, Lv5=20, Lv6=25.',
+                'unlocked'    => $dailyLoggerLevel > 0,
+                'level'       => $dailyLoggerLevel,
+                'progress'    => $distinctDaysThisMonth,
+                'next_target' => $this->nextTarget($distinctDaysThisMonth, [3, 7, 10, 15, 20, 25]),
             ],
             [
-                'key' => 'comeback',
-                'name' => 'Comeback',
-                'description' => 'Pernah defisit lalu berhasil kembali surplus.',
-                'unlocked' => $hasDeficit && $latestPositive,
+                'key'         => 'comeback',
+                'name'        => 'Comeback',
+                'description' => 'Bangkit dari defisit ke surplus. Lv1=1x, Lv6=6x.',
+                'unlocked'    => $comebackLevel > 0,
+                'level'       => $comebackLevel,
+                'progress'    => $comebackCount,
+                'next_target' => $this->nextTarget($comebackCount, [1, 2, 3, 4, 5, 6]),
             ],
         ];
 
         return [
             'summary' => [
-                'unlocked_count' => collect($unlocked)->where('unlocked', true)->count(),
-                'total_badges' => count($unlocked),
+                'unlocked_count' => collect($badges)->where('unlocked', true)->count(),
+                'total_badges'   => count($badges),
+                'max_level'      => 6,
             ],
-            'badges' => $unlocked,
+            'badges' => $badges,
         ];
+    }
+
+    /**
+     * Returns level 1-6 based on which threshold the value has crossed.
+     * Returns 0 if below the first threshold (locked).
+     */
+    private function levelFromThresholds(int $value, array $thresholds): int
+    {
+        $level = 0;
+        foreach ($thresholds as $threshold) {
+            if ($value >= $threshold) {
+                $level++;
+            } else {
+                break;
+            }
+        }
+        return $level;
+    }
+
+    /**
+     * Returns the next threshold the user needs to reach, or null if maxed out.
+     */
+    private function nextTarget(int $value, array $thresholds): ?int
+    {
+        foreach ($thresholds as $threshold) {
+            if ($value < $threshold) {
+                return $threshold;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Count consecutive months (up to $months back) where user had budgets
+     * and none were overbudget. Stops counting at first month with overbudget.
+     */
+    private function countBudgetKeeperMonths(User $user, int $months): int
+    {
+        $count = 0;
+        for ($i = 0; $i < $months; $i++) {
+            $month      = Carbon::now()->startOfMonth()->subMonths($i);
+            $period     = $month->format('Y-m');
+            $monthStart = $month->copy()->startOfMonth()->toDateString();
+            $monthEnd   = $month->copy()->endOfMonth()->toDateString();
+
+            $budgets = $user->budgets()->where('period', $period)->get();
+            if ($budgets->isEmpty()) {
+                break;
+            }
+
+            $hasOverbudget = false;
+            foreach ($budgets as $budget) {
+                $spent = (float) $user->transactions()
+                    ->where('type', 'expense')
+                    ->where('category', $budget->category)
+                    ->whereBetween('transaction_date', [$monthStart, $monthEnd])
+                    ->sum('amount');
+                if ($spent > (float) $budget->monthly_limit) {
+                    $hasOverbudget = true;
+                    break;
+                }
+            }
+
+            if ($hasOverbudget) {
+                break;
+            }
+
+            $count++;
+        }
+        return $count;
     }
 
     public function leaderboard(): array
     {
+        $monthStart = Carbon::now()->startOfMonth()->toDateString();
+        $monthEnd = Carbon::now()->endOfMonth()->toDateString();
+
         $users = User::query()
-            ->with(['transactions', 'budgets'])
+            ->select('id', 'name', 'avatar')
+            ->withCount([
+                'transactions as log_days' => function ($query) use ($monthStart, $monthEnd) {
+                    $query->selectRaw('COUNT(DISTINCT transaction_date)')
+                        ->whereBetween('transaction_date', [$monthStart, $monthEnd]);
+                },
+            ])
+            ->with([
+                'transactions' => fn($query) => $query
+                    ->selectRaw('user_id, type, SUM(amount) as total')
+                    ->whereBetween('transaction_date', [$monthStart, $monthEnd])
+                    ->groupBy('user_id', 'type'),
+                'budgets' => fn($query) => $query->where('period', Carbon::now()->format('Y-m')),
+            ])
             ->get();
 
-        $rows = $users->map(function (User $user) {
-            $chart = collect($this->buildMonthlyChart($user, 3));
-            $latest = $chart->last() ?? ['income' => 0, 'expense' => 0, 'balance' => 0];
-            $savingRate = $latest['income'] > 0 ? (($latest['income'] - $latest['expense']) / $latest['income']) * 100 : 0;
-            $logDays = $user->transactions()
-                ->whereBetween('transaction_date', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
-                ->distinct('transaction_date')
-                ->count('transaction_date');
+        $rows = $users->map(function (User $user) use ($monthStart, $monthEnd) {
+            $income = 0.0;
+            $expense = 0.0;
 
-            $overBudgetCount = collect($this->budgetStatus($user))->where('is_overbudget', true)->count();
-            $badgeUnlocked = $this->badges($user)['summary']['unlocked_count'];
+            foreach ($user->transactions as $row) {
+                if ($row->type === 'income') {
+                    $income = (float) $row->total;
+                }
 
-            $score = round(max(0, min(100, $savingRate + ($logDays * 2) + ($badgeUnlocked * 3) - ($overBudgetCount * 10))), 2);
+                if ($row->type === 'expense') {
+                    $expense = (float) $row->total;
+                }
+            }
+
+            $savingRate = $income > 0 ? (($income - $expense) / $income) * 100 : 0;
+            $logDays = (int) $user->log_days;
+
+            $period = Carbon::now()->format('Y-m');
+            $overBudget = 0;
+            $badgeUnlocked = 0;
+
+            if ($income > $expense) {
+                $badgeUnlocked++;
+            }
+
+            if ($user->transactions->count() >= 20) {
+                $badgeUnlocked++;
+            }
+
+            $score = round(max(0, min(100,
+                $savingRate + ($logDays * 2) + ($badgeUnlocked * 3) - ($overBudget * 10)
+            )), 2);
 
             return [
-                'name' => $user->name,
+                'name'             => $user->name,
+                'avatar'           => $user->avatar,
                 'discipline_score' => $score,
-                'saving_rate' => round($savingRate, 2),
-                'active_days' => $logDays,
+                'saving_rate'      => round($savingRate, 2),
+                'active_days'      => $logDays,
             ];
         })
             ->sortByDesc('discipline_score')
