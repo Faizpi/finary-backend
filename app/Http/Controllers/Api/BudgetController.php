@@ -46,7 +46,7 @@ class BudgetController extends Controller
 
     public function update(UpdateBudgetRequest $request, Budget $budget): JsonResponse
     {
-        $this->authorizeOwnership($request, $budget);
+        $this->authorize('update', $budget);
         $budget->update($request->validated());
 
         return response()->json([
@@ -57,16 +57,11 @@ class BudgetController extends Controller
 
     public function destroy(Request $request, Budget $budget): JsonResponse
     {
-        $this->authorizeOwnership($request, $budget);
+        $this->authorize('delete', $budget);
         $budget->delete();
 
         return response()->json([
             'message' => 'Budget dihapus.',
         ]);
-    }
-
-    private function authorizeOwnership(Request $request, Budget $budget): void
-    {
-        abort_if($budget->user_id !== $request->user()->id, 403, 'Akses ditolak.');
     }
 }

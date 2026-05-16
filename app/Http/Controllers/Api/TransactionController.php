@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\PredictionCacheContract;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Transaction\StoreTransactionRequest;
 use App\Http\Requests\Transaction\UpdateTransactionRequest;
@@ -10,10 +11,13 @@ use App\Models\Transaction;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 
 class TransactionController extends Controller
 {
+    public function __construct(private readonly PredictionCacheContract $predictionCache)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = $request->user()->transactions()->orderByDesc('transaction_date')->orderByDesc('id');
@@ -46,7 +50,7 @@ class TransactionController extends Controller
     {
         $transaction = $request->user()->transactions()->create($request->validated());
 
-        $this->invalidatePredictionCache($request->user()->id);
+        $this->predictionCache->forgetDaily($request->user()->id);
 
         return response()->json([
             'message' => 'Transaksi berhasil ditambahkan.',
@@ -56,10 +60,10 @@ class TransactionController extends Controller
 
     public function update(UpdateTransactionRequest $request, Transaction $transaction): JsonResponse
     {
-        $this->authorizeOwnership($request, $transaction);
+        $this->authorize('update', $transaction);
         $transaction->update($request->validated());
 
-        $this->invalidatePredictionCache($request->user()->id);
+        $this->predictionCache->forgetDaily($request->user()->id);
 
         return response()->json([
             'message' => 'Transaksi berhasil diperbarui.',
@@ -69,19 +73,14 @@ class TransactionController extends Controller
 
     public function destroy(Request $request, Transaction $transaction): JsonResponse
     {
-        $this->authorizeOwnership($request, $transaction);
+        $this->authorize('delete', $transaction);
         $transaction->delete();
 
-        $this->invalidatePredictionCache($request->user()->id);
+        $this->predictionCache->forgetDaily($request->user()->id);
 
         return response()->json([
             'message' => 'Transaksi dihapus.',
         ]);
-    }
-
-    private function authorizeOwnership(Request $request, Transaction $transaction): void
-    {
-        abort_if($transaction->user_id !== $request->user()->id, 403, 'Akses ditolak.');
     }
 
     private function monthRange(string $month): array
@@ -92,11 +91,5 @@ class TransactionController extends Controller
             $date->copy()->startOfMonth()->toDateString(),
             $date->copy()->endOfMonth()->toDateString(),
         ];
-    }
-
-    private function invalidatePredictionCache(int $userId): void
-    {
-        $dateKey = Carbon::now()->toDateString();
-        Cache::forget("finary:predict:{$userId}:{$dateKey}");
     }
 }

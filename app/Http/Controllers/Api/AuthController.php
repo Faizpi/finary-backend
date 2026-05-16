@@ -2,61 +2,26 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\UserRegistrationContract;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
-use App\Services\FinancialClassifierService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly FinancialClassifierService $classifier)
+    public function __construct(private readonly UserRegistrationContract $registration)
     {
     }
 
     public function register(RegisterRequest $request): JsonResponse
     {
-        $validated = $request->validated();
-
-        $defaultAssessmentPayload = [
-            'monthly_income'       => 6000000,
-            'monthly_expense'      => 4200000,
-            'monthly_expense_total'=> 4200000,
-            'actual_savings'       => 1800000,
-            'budget_goal'          => 1200000,
-            'emergency_fund'       => 5000000,
-            'loan_payment'         => 0,
-            'available_hours_per_week' => 8,
-            'skills'               => ['communication'],
-        ];
-
-        [$user, $token] = DB::transaction(function () use ($validated, $defaultAssessmentPayload) {
-            $user = User::create($validated);
-
-            $classificationResult = $this->classifier->classify($defaultAssessmentPayload);
-
-            $user->assessments()->create([
-                ...$defaultAssessmentPayload,
-                'classification' => $classificationResult['classification'],
-                'ml_score'       => $classificationResult['score'] ?? null,
-                'ml_explanation' => $classificationResult['explanation'] ?? null,
-                'metadata'       => [
-                    'source'                => $classificationResult['source'],
-                    'classification_result' => $classificationResult,
-                    'stage'                 => 'onboarding',
-                ],
-            ]);
-
-            $token = $user->createToken('finary-token')->plainTextToken;
-
-            return [$user, $token];
-        });
+        ['user' => $user, 'token' => $token] = $this->registration->register($request->validated());
 
         return response()->json([
             'message' => 'Register berhasil.',
@@ -105,11 +70,11 @@ class AuthController extends Controller
     public function updateAvatar(Request $request): JsonResponse
     {
         $request->validate([
-            'avatar' => ['required', 'string', 'max:300000'],
+            'avatar' => ['nullable', 'string', 'max:300000'],
         ]);
 
         $user = $request->user();
-        $user->avatar = $request->input('avatar');
+        $user->avatar = (string) $request->input('avatar', '');
         $user->save();
 
         return response()->json([

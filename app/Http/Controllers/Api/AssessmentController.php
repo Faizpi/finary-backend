@@ -2,19 +2,21 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\FinancialClassifierContract;
+use App\Contracts\PredictionCacheContract;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Assessment\PatchAssessmentRequest;
 use App\Http\Requests\Assessment\StoreAssessmentRequest;
 use App\Http\Resources\AssessmentResource;
-use App\Services\FinancialClassifierService;
-use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 
 class AssessmentController extends Controller
 {
-    public function __construct(private readonly FinancialClassifierService $classifier)
-    {
+    public function __construct(
+        private readonly FinancialClassifierContract $classifier,
+        private readonly PredictionCacheContract $predictionCache,
+    ) {
     }
 
     public function latest(Request $request): JsonResponse
@@ -62,9 +64,7 @@ class AssessmentController extends Controller
             ],
         ]);
 
-        // Invalidate daily prediction cache so next profile load uses fresh data
-        $dateKey = Carbon::now()->toDateString();
-        Cache::forget("finary:predict:{$request->user()->id}:{$dateKey}");
+        $this->predictionCache->forgetDaily($request->user()->id);
 
         return response()->json([
             'message' => 'Assessment tersimpan.',
@@ -72,7 +72,7 @@ class AssessmentController extends Controller
         ], 201);
     }
 
-    public function patchLatest(Request $request): JsonResponse
+    public function patchLatest(PatchAssessmentRequest $request): JsonResponse
     {
         $assessment = $request->user()->assessments()->latest()->first();
 
@@ -80,22 +80,13 @@ class AssessmentController extends Controller
             return response()->json(['message' => 'Belum ada assessment.'], 404);
         }
 
-        $validated = $request->validate([
-            'loan_payment'             => ['nullable', 'numeric', 'min:0'],
-            'emergency_fund'           => ['nullable', 'numeric', 'min:0'],
-            'available_hours_per_week' => ['nullable', 'integer', 'min:0', 'max:168'],
-            'skills'                   => ['nullable', 'array', 'max:20'],
-            'skills.*'                 => ['string', 'max:40'],
-        ]);
-
-        $fillable = array_filter($validated, fn($value) => $value !== null);
+        $fillable = array_filter($request->validated(), fn($value) => $value !== null);
 
         if (!empty($fillable)) {
             $assessment->update($fillable);
         }
 
-        $dateKey = now()->toDateString();
-        Cache::forget("finary:predict:{$request->user()->id}:{$dateKey}");
+        $this->predictionCache->forgetDaily($request->user()->id);
 
         return response()->json([
             'message' => 'Assessment diperbarui.',

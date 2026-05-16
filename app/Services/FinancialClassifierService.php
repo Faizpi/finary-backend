@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
-class FinancialClassifierService
+use App\Contracts\FinancialClassifierContract;
+use App\Contracts\MlGatewayContract;
+
+class FinancialClassifierService implements FinancialClassifierContract
 {
-    public function __construct(private readonly MlGatewayService $mlGateway)
+    public function __construct(private readonly MlGatewayContract $mlGateway)
     {
     }
 

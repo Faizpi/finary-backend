@@ -2,10 +2,11 @@
 
 namespace App\Services;
 
+use App\Contracts\MlGatewayContract;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class MlGatewayService
+class MlGatewayService implements MlGatewayContract
 {
     public function classifyAssessment(array $payload): ?array
     {

@@ -2,7 +2,10 @@
 
 namespace App\Services;
 
-class SideHustleRecommendationService
+use App\Contracts\MlGatewayContract;
+use App\Contracts\SideHustleRecommenderContract;
+
+class SideHustleRecommendationService implements SideHustleRecommenderContract
 {
     private const HUSTLE_CATALOG = [
         [
@@ -55,7 +58,7 @@ class SideHustleRecommendationService
         ],
     ];
 
-    public function __construct(private readonly MlGatewayService $mlGateway)
+    public function __construct(private readonly MlGatewayContract $mlGateway)
     {
     }
 
