@@ -27,10 +27,18 @@ class InsightController extends Controller
         ]);
     }
 
-    public function leaderboard(): JsonResponse
+    public function leaderboard(Request $request): JsonResponse
     {
-        return response()->json([
-            'data' => $this->insightService->leaderboard(),
+        $validated = $request->validate([
+            'month' => ['nullable', 'date_format:Y-m'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
+
+        return response()->json($this->insightService->leaderboard(
+            $validated['month'] ?? null,
+            (int) ($validated['page'] ?? 1),
+            (int) ($validated['per_page'] ?? 10),
+        ));
     }
 }

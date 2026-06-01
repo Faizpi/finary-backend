@@ -114,9 +114,9 @@ class FinancialInsightService
         return $this->badgeService->badges($user);
     }
 
-    public function leaderboard(): array
+    public function leaderboard(?string $month = null, int $page = 1, int $perPage = 10): array
     {
-        return $this->leaderboardService->leaderboard();
+        return $this->leaderboardService->leaderboard($month, $page, $perPage);
     }
 
     // ─── Private helpers kept here for profile() ────────────────────────

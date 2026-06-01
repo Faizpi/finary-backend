@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * Computes the monthly leaderboard across all users.
@@ -11,12 +12,19 @@ use Carbon\Carbon;
 class LeaderboardService
 {
     /**
-     * @return array<int, array<string, mixed>>
+     * @return array{data: array<int, array<string, mixed>>, meta: array<string, mixed>}
      */
-    public function leaderboard(): array
+    public function leaderboard(?string $month = null, int $page = 1, int $perPage = 10): array
     {
-        $monthStart = Carbon::now()->startOfMonth()->toDateString();
-        $monthEnd   = Carbon::now()->endOfMonth()->toDateString();
+        $period = $month
+            ? Carbon::createFromFormat('Y-m', $month)->startOfMonth()
+            : Carbon::now()->startOfMonth();
+
+        $page = max(1, $page);
+        $perPage = max(1, min($perPage, 100));
+        $monthKey = $period->format('Y-m');
+        $monthStart = $period->copy()->startOfMonth()->toDateString();
+        $monthEnd   = $period->copy()->endOfMonth()->toDateString();
 
         $users = User::query()
             ->select('id', 'name', 'avatar')
@@ -31,7 +39,7 @@ class LeaderboardService
                     ->selectRaw('user_id, type, SUM(amount) as total')
                     ->whereBetween('transaction_date', [$monthStart, $monthEnd])
                     ->groupBy('user_id', 'type'),
-                'budgets' => fn($query) => $query->where('period', Carbon::now()->format('Y-m')),
+                'budgets' => fn($query) => $query->where('period', $monthKey),
             ])
             ->get();
 
@@ -66,6 +74,7 @@ class LeaderboardService
             )), 2);
 
             return [
+                'id'               => $user->id,
                 'name'             => $user->name,
                 'avatar'           => $user->avatar,
                 'discipline_score' => $score,
@@ -78,7 +87,31 @@ class LeaderboardService
 
         return $rows->map(function (array $row, int $index) {
             $row['rank'] = $index + 1;
+
             return $row;
-        })->take(10)->all();
+        })->pipe(fn(Collection $ranked) => $this->paginateRows($ranked, $page, $perPage, $monthKey, $monthStart, $monthEnd));
+    }
+
+    /**
+     * @return array{data: array<int, array<string, mixed>>, meta: array<string, mixed>}
+     */
+    private function paginateRows(Collection $ranked, int $page, int $perPage, string $monthKey, string $monthStart, string $monthEnd): array
+    {
+        $total = $ranked->count();
+        $lastPage = max(1, (int) ceil($total / $perPage));
+
+        return [
+            'data' => $ranked->forPage($page, $perPage)->values()->all(),
+            'meta' => [
+                'current_page' => $page,
+                'last_page' => $lastPage,
+                'per_page' => $perPage,
+                'total' => $total,
+                'has_more' => $page < $lastPage,
+                'month' => $monthKey,
+                'period_start' => $monthStart,
+                'period_end' => $monthEnd,
+            ],
+        ];
     }
 }
