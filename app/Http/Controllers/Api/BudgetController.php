@@ -19,8 +19,12 @@ class BudgetController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'month' => ['nullable', 'date_format:Y-m'],
+        ]);
+
         return response()->json([
-            'data' => $this->insightService->budgetStatus($request->user()),
+            'data' => $this->insightService->budgetStatus($request->user(), $validated['month'] ?? null),
         ]);
     }
 

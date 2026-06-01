@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
 /**
@@ -21,19 +22,27 @@ class FinancialInsightService
     ) {
     }
 
-    public function dashboard(User $user): array
+    public function dashboard(User $user, ?string $month = null): array
     {
-        $summary = $this->summaryService->currentMonthSummary($user);
+        $period = $month
+            ? Carbon::createFromFormat('Y-m', $month)->startOfMonth()
+            : Carbon::now()->startOfMonth();
+        $monthKey = $period->format('Y-m');
+        $monthStart = $period->copy()->startOfMonth()->toDateString();
+        $monthEnd = $period->copy()->endOfMonth()->toDateString();
+        $summary = $this->summaryService->currentMonthSummary($user, $monthKey);
 
         return [
             'summary'               => $summary,
-            'monthly_chart'         => $this->summaryService->buildMonthlyChart($user, 6),
+            'period'                => $monthKey,
+            'monthly_chart'         => $this->summaryService->buildMonthlyChart($user, 6, $monthKey),
             'recent_transactions'   => $user->transactions()
+                ->whereBetween('transaction_date', [$monthStart, $monthEnd])
                 ->latest('transaction_date')
                 ->latest('id')
                 ->limit(5)
                 ->get(),
-            'budget_snapshot'       => $this->budgetStatusService->budgetStatus($user),
+            'budget_snapshot'       => $this->budgetStatusService->budgetStatus($user, $monthKey),
             'latest_classification' => optional($user->assessments()->latest()->first())->classification,
         ];
     }
@@ -104,9 +113,9 @@ class FinancialInsightService
         ];
     }
 
-    public function budgetStatus(User $user): array
+    public function budgetStatus(User $user, ?string $month = null): array
     {
-        return $this->budgetStatusService->budgetStatus($user);
+        return $this->budgetStatusService->budgetStatus($user, $month);
     }
 
     public function badges(User $user): array

@@ -7,19 +7,19 @@ use App\Models\User;
 use Carbon\Carbon;
 
 /**
- * Computes budget status for the current period.
+ * Computes budget status for a monthly period.
  */
 class BudgetStatusService
 {
     /**
      * Return spend/remaining/progress for every budget pocket of the user
-     * in the current month.
+     * in the requested month.
      *
      * @return array<int, array<string, mixed>>
      */
-    public function budgetStatus(User $user): array
+    public function budgetStatus(User $user, ?string $month = null): array
     {
-        $period  = Carbon::now()->format('Y-m');
+        $period  = $month ?: Carbon::now()->format('Y-m');
         $budgets = $user->budgets()->where('period', $period)->get();
 
         return $budgets->map(function (Budget $budget) use ($user, $period) {

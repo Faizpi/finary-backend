@@ -15,8 +15,12 @@ class DashboardController extends Controller
 
     public function show(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'month' => ['nullable', 'date_format:Y-m'],
+        ]);
+
         return response()->json([
-            'data' => $this->insightService->dashboard($request->user()),
+            'data' => $this->insightService->dashboard($request->user(), $validated['month'] ?? null),
         ]);
     }
 }

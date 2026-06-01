@@ -16,9 +16,10 @@ class FinancialSummaryService
      *
      * @return array<int, array{month: string, income: float, expense: float, balance: float}>
      */
-    public function buildMonthlyChart(User $user, int $months): array
+    public function buildMonthlyChart(User $user, int $months, ?string $endMonth = null): array
     {
-        $startMonth = Carbon::now()->startOfMonth()->subMonths($months - 1);
+        $endPeriod = $this->monthPeriod($endMonth);
+        $startMonth = $endPeriod->copy()->subMonths($months - 1);
         $result = [];
 
         for ($i = 0; $i < $months; $i++) {
@@ -49,14 +50,15 @@ class FinancialSummaryService
     }
 
     /**
-     * Summarise income/expense/balance/saving_rate for the current month.
+     * Summarise income/expense/balance/saving_rate for a month.
      *
-     * @return array{income: float, expense: float, balance: float, saving_rate: float}
+     * @return array{income: float, expense: float, balance: float, saving_rate: float, month: string}
      */
-    public function currentMonthSummary(User $user): array
+    public function currentMonthSummary(User $user, ?string $month = null): array
     {
-        $start = Carbon::now()->startOfMonth();
-        $end   = Carbon::now()->endOfMonth();
+        $period = $this->monthPeriod($month);
+        $start = $period->copy()->startOfMonth();
+        $end   = $period->copy()->endOfMonth();
 
         $monthly = $user->transactions()
             ->whereBetween('transaction_date', [$start->toDateString(), $end->toDateString()])
@@ -72,6 +74,7 @@ class FinancialSummaryService
             'expense'     => round($expense, 2),
             'balance'     => round($balance, 2),
             'saving_rate' => round($savingRate, 2),
+            'month'       => $period->format('Y-m'),
         ];
     }
 
@@ -92,5 +95,12 @@ class FinancialSummaryService
         }
 
         return 'stabil';
+    }
+
+    private function monthPeriod(?string $month = null): Carbon
+    {
+        return $month
+            ? Carbon::createFromFormat('Y-m', $month)->startOfMonth()
+            : Carbon::now()->startOfMonth();
     }
 }
