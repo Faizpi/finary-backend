@@ -45,6 +45,15 @@ $app = require_once $projectPath . '/bootstrap/app.php';
 
 $kernel = $app->make(Kernel::class);
 
+$ensureLaravelBootstrapped = function() use ($kernel) {
+    static $bootstrapped = false;
+
+    if (!$bootstrapped) {
+        $kernel->bootstrap();
+        $bootstrapped = true;
+    }
+};
+
 // Helper closure to read .env file directly
 $getEnvValue = function($key, $default = null) use ($projectPath) {
     static $envCache = null;
@@ -75,6 +84,54 @@ $getEnvValue = function($key, $default = null) use ($projectPath) {
     }
     
     return $envCache[$key] ?? $default;
+};
+
+$getDatabaseRuntimeConfig = function() use ($getEnvValue) {
+    return [
+        'connection' => $getEnvValue('DB_CONNECTION', 'mysql'),
+        'host' => $getEnvValue('DB_HOST', '127.0.0.1'),
+        'port' => $getEnvValue('DB_PORT', '3306'),
+        'database' => $getEnvValue('DB_DATABASE', 'forge'),
+        'username' => $getEnvValue('DB_USERNAME', 'forge'),
+        'password' => $getEnvValue('DB_PASSWORD', ''),
+        'socket' => $getEnvValue('DB_SOCKET', ''),
+    ];
+};
+
+$syncDatabaseConfigFromEnv = function() use ($app, $ensureLaravelBootstrapped, $getDatabaseRuntimeConfig) {
+    $ensureLaravelBootstrapped();
+
+    $db = $getDatabaseRuntimeConfig();
+    $app['config']->set('database.default', $db['connection']);
+
+    if ($db['connection'] === 'mysql') {
+        $app['config']->set('database.connections.mysql.host', $db['host']);
+        $app['config']->set('database.connections.mysql.port', $db['port']);
+        $app['config']->set('database.connections.mysql.database', $db['database']);
+        $app['config']->set('database.connections.mysql.username', $db['username']);
+        $app['config']->set('database.connections.mysql.password', $db['password']);
+        $app['config']->set('database.connections.mysql.unix_socket', $db['socket']);
+
+        if ($app->bound('db')) {
+            $app['db']->purge('mysql');
+        }
+    }
+
+    return $db;
+};
+
+$printDatabaseConnectionHelp = function(Throwable $e, array $db) {
+    $message = $e->getMessage();
+    echo "✗ Database connection failed: " . $message . "\n";
+    echo "Checked: DB_HOST={$db['host']} DB_PORT={$db['port']} DB_DATABASE={$db['database']} DB_USERNAME={$db['username']}\n";
+
+    if (str_contains($message, '[1044]')) {
+        echo "Hint: MySQL accepted the username but denied access to DB_DATABASE. Create/select the exact database '{$db['database']}' and grant '{$db['username']}' privileges to it, or update .env to the database/user names shown in the hosting panel.\n";
+    } elseif (str_contains($message, '[1045]')) {
+        echo "Hint: MySQL rejected the username/password. Check DB_USERNAME and DB_PASSWORD in .env.\n";
+    } elseif (str_contains($message, '[2002]')) {
+        echo "Hint: MySQL host/port is unreachable. Check DB_HOST and DB_PORT.\n";
+    }
 };
 
 $commands = [
@@ -120,6 +177,22 @@ $presets = [
 
 // Custom handlers untuk storage operations
 $customHandlers = [
+    'Migrate' => function() use ($kernel, $syncDatabaseConfigFromEnv, $printDatabaseConnectionHelp) {
+        $db = $syncDatabaseConfigFromEnv();
+
+        try {
+            $status = $kernel->call('migrate', ['--force' => true]);
+            echo $kernel->output();
+            return $status;
+        } catch (Throwable $e) {
+            if ($db['connection'] === 'mysql') {
+                $printDatabaseConnectionHelp($e, $db);
+            } else {
+                echo "✗ Migration failed: " . $e->getMessage() . "\n";
+            }
+            return 1;
+        }
+    },
     'Storage Unlink' => function() use ($projectPath) {
         $publicStorage = $projectPath . '/public/storage';
         if (is_link($publicStorage)) {
@@ -500,14 +573,22 @@ $customHandlers = [
             return 1;
         }
     },
-    'Migrate Fresh' => function() use ($projectPath, $getEnvValue, $kernel) {
+    'Migrate Fresh' => function() use ($projectPath, $kernel, $syncDatabaseConfigFromEnv, $printDatabaseConnectionHelp) {
         echo "🧹 Cleaning database (Manual Wipe)...\n";
         
-        $dbHost = $getEnvValue('DB_HOST', '127.0.0.1');
-        $dbPort = $getEnvValue('DB_PORT', '3306');
-        $dbName = $getEnvValue('DB_DATABASE', 'forge');
-        $dbUser = $getEnvValue('DB_USERNAME', 'forge');
-        $dbPass = $getEnvValue('DB_PASSWORD', '');
+        $db = $syncDatabaseConfigFromEnv();
+        $dbHost = $db['host'];
+        $dbPort = $db['port'];
+        $dbName = $db['database'];
+        $dbUser = $db['username'];
+        $dbPass = $db['password'];
+
+        if ($db['connection'] !== 'mysql') {
+            echo "ℹ Manual wipe is only used for MySQL. Running Laravel migrate:fresh...\n";
+            $status = $kernel->call('migrate:fresh', ['--force' => true]);
+            echo $kernel->output();
+            return $status;
+        }
 
         try {
             // 1. Manual Wipe using PDO
@@ -546,7 +627,7 @@ $customHandlers = [
             
             return $status;
         } catch (PDOException $e) {
-            echo "✗ Database connection failed: " . $e->getMessage() . "\n";
+            $printDatabaseConnectionHelp($e, $db);
             return 1;
         } catch (Exception $e) {
             echo "✗ Error: " . $e->getMessage() . "\n";
@@ -658,8 +739,8 @@ if (!empty($selectedCommands) || !empty($customCommand)) {
             $out = ob_get_clean();
             $ok  = ($status === 0);
             $resultLines[] = ['label' => $label, 'cmd' => $commands[$label], 'output' => $out, 'ok' => $ok, 'ms' => $ms, 'status' => $status];
-            $ok ? $successCount++ : $successCount++;
-        } catch (Exception $e) {
+            $ok ? $successCount++ : $failCount++;
+        } catch (Throwable $e) {
             $ms = round((microtime(true) - $t0) * 1000, 2);
             ob_get_clean();
             $resultLines[] = ['label' => $label, 'cmd' => $commands[$label], 'output' => "✗ EXCEPTION: " . $e->getMessage(), 'ok' => false, 'ms' => $ms];
@@ -1854,4 +1935,3 @@ window.addEventListener('DOMContentLoaded', () => {
 </body>
 </html>
 <?php echo ob_get_clean(); ?>
-
